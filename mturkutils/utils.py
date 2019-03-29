@@ -3,7 +3,45 @@ import os
 import json
 from bson import json_util
 import shutil as sh
-import base
+# import base
+
+
+
+def SONify(arg, memo=None):
+    if memo is None:
+        memo = {}
+    if id(arg) in memo:
+        rval = memo[id(arg)]
+    if isinstance(arg, ObjectId):
+        rval = arg
+    elif isinstance(arg, datetime.datetime):
+        rval = arg
+    elif isinstance(arg, np.floating):
+        rval = float(arg)
+    elif isinstance(arg, np.integer):
+        rval = int(arg)
+    elif isinstance(arg, (list, tuple)):
+        rval = type(arg)([SONify(ai, memo) for ai in arg])
+    elif isinstance(arg, collections.OrderedDict):
+        rval = collections.OrderedDict([(SONify(k, memo), SONify(v, memo))
+            for k, v in arg.items()])
+    elif isinstance(arg, dict):
+        rval = dict([(SONify(k, memo), SONify(v, memo))
+            for k, v in arg.items()])
+    elif isinstance(arg, (basestring, float, int, type(None))):
+        rval = arg
+    elif isinstance(arg, np.ndarray):
+        if arg.ndim == 0:
+            rval = SONify(arg.sum())
+        else:
+            rval = map(SONify, arg)  # N.B. memo None
+    # -- put this after ndarray because ndarray not hashable
+    elif arg in (True, False):
+        rval = int(arg)
+    else:
+        raise TypeError('SONify', arg)
+    memo[id(rval)] = rval
+    return rval
 
 
 def chunker(seq, size):
@@ -60,14 +98,14 @@ def prep_web_simple(trials, src, dstdir, rules, dstpatt='output_n%04d.html',
 
     for i_chunk, chunk in enumerate(chunkerfunc(trials, n_per_file)):
         if verbose and i_chunk % n_per_file == 0:
-            print '    At:', i_chunk
+            print('    At:', i_chunk)
 
         html_dst = html_src
         for rule in rules:
             sold = rule['old']
             snew = rule['new']
             if '${CHUNK}' in snew:
-                snew = snew.replace('${CHUNK}', json.dumps(base.SONify(chunk), default=json_util.default))
+                snew = snew.replace('${CHUNK}', json.dumps(SONify(chunk), default=json_util.default))
             html_dst = html_dst.replace(sold, snew)
 
         if prefix is None:

@@ -13,13 +13,14 @@ import json
 import datetime
 import numpy as np
 import scipy.stats as stats
-import cPickle as pk
+import pickle as pk
 from collections import Counter, defaultdict
 import csv
 import boto
 import boto.mturk
 from warnings import warn
-from tabular.tab import tabarray
+#from tabular.tab import tabarray
+# dont use tabular!
 from bson.objectid import ObjectId
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
@@ -238,7 +239,7 @@ class Experiment(object):
                     else:
                         if assignment_status in ['Submitted']:
                             self.conn.approve_assignment(assignment_id)
-                except boto.mturk.connection.MTurkRequestError, e:
+                except boto.mturk.connection.MTurkRequestError as e:
                     print('Error for assignment_id %s' % assignment_id, e)
         for doc in coll.find():
             assignment_id = doc['AssignmentID']
@@ -247,7 +248,7 @@ class Experiment(object):
                 assignment_status = \
                         self.conn.get_assignment(assignment_id
                                 )[0].AssignmentStatus
-            except boto.mturk.connection.MTurkRequestError, e:
+            except boto.mturk.connection.MTurkRequestError as e:
                 print('Error for assignment_id %s' % assignment_id, e)
                 continue
             bonus = doc.get('Bonus')
@@ -258,8 +259,8 @@ class Experiment(object):
                         bonus = np.round(float(bonus) * 100) / 100
                         if bonus >= 0.01:
                             p = boto.mturk.price.Price(bonus)
-                            print 'award granted'
-                            print bonus
+                            print('award granted')
+                            print(bonus)
                             self.conn.grant_bonus(worker_id,
                                     assignment_id,
                                     p,
@@ -308,13 +309,13 @@ class Experiment(object):
         else:
             mongo_host = self.mongo_host
 
-        if isinstance(meta, tabarray):
-            print('Converting tabarray to dictionary for speed. '
-                    'This may take a minute...')
-            self.meta = convertTabArrayToDict(meta)
-        else:
-            self.meta = meta
-
+#        if isinstance(meta, tabarray):
+#            print('Converting tabarray to dictionary for speed. '
+#                    'This may take a minute...')
+#            self.meta = convertTabArrayToDict(meta)
+#        else:
+#            self.meta = meta
+        self.meta = meta
         # if no db connection is requested, bypass the rest
         if collection_name is None:
             return
@@ -417,7 +418,7 @@ class Experiment(object):
         self.base_URLs = []
         self.final_rules = []
         for label, rules, dstdir, pfix in rulesets:
-            print ('  ->', label, pfix)
+            print('  ->', label, pfix)
             new_urls = ut.prep_web_simple(trials, htmlsrc,
                     dstdir, dstpatt=htmldst,
                     rules=rules, auxfns=auxfns,
@@ -447,11 +448,11 @@ class Experiment(object):
         fns_production = sorted(glob.glob(os.path.join(
             tmpdir_production, '*.html')))
 
-        print '* Testing sandbox...'
+        print('* Testing sandbox...')
         ut.validate_html_files(fns_sandbox,
                 ruledict=self.final_rules,
                 trials_org=trials_org)
-        print '* Testing production...'
+        print('* Testing production...')
         ut.validate_html_files(fns_production,
                 ruledict=self.final_rules,
                 trials_org=trials_org)
@@ -464,12 +465,12 @@ class Experiment(object):
         bucket_name = self.bucket_name
 
         """Upload generated web files into S3"""
-        print '* Uploading sandbox...'
+        print('* Uploading sandbox...')
         fns = glob.glob(os.path.join(tmpdir_sandbox, '*.*'))
         keys = upload_files(fns, bucket_name,
                 dstprefix=sandbox_prefix + '/', test=True, verbose=10)
 
-        print '* Uploading production...'
+        print('* Uploading production...')
         fns = glob.glob(os.path.join(tmpdir_production, '*.*'))
         keys += upload_files(fns, bucket_name,
                 dstprefix=production_prefix + '/', test=True, verbose=10)
@@ -793,14 +794,14 @@ class MatchToSampleFromDLDataExperiment(Experiment):
         assert len(urls) == len(img_inds)
 
         if verbose > 0:
-            print '** n =', n
-            print '** k =', k
-            print '** num_per_category =', num_per_category
-            print '** num_sample =', num_sample
-            print '** len(urls) =', len(urls)
-            print '** len(meta) =', len(meta)
+            print('** n =', n)
+            print('** k =', k)
+            print('** num_per_category =', num_per_category)
+            print('** num_sample =', num_sample)
+            print('** len(urls) =', len(urls))
+            print('** len(meta) =', len(meta))
         if verbose > 1:
-            print '** category_occurences =', category_occurences
+            print('** category_occurences =', category_occurences)
 
         for url, img_ind in zip(urls, img_inds):
             meta_entry = meta[img_ind]
@@ -849,21 +850,21 @@ class MatchToSampleFromDLDataExperiment(Experiment):
             rng.shuffle(list_data)
 
         if verbose > 0:
-            print '** max len in left synset_urls =', \
+            print('** max len in left synset_urls =', \
                     sorted([(len(synset_urls[e]), e)
-                        for e in synset_urls])[-1]
-            print '** max len in left category_meta_dicts =', \
+                        for e in synset_urls])[-1])
+            print('** max len in left category_meta_dicts =', \
                     sorted([(len(category_meta_dicts[e]), e)
-                            for e in category_meta_dicts])[-1]
+                            for e in category_meta_dicts])[-1])
         if verbose > 1:
-            print '** len for each in left synset_urls =', \
-                    {e: len(synset_urls[e]) for e in synset_urls}
-            print '** len for each in left category_meta_dicts =', \
+            print('** len for each in left synset_urls =', \
+                    {e: len(synset_urls[e]) for e in synset_urls})
+            print('** len for each in left category_meta_dicts =', \
                     {e: len(category_meta_dicts[e])
-                            for e in category_meta_dicts}
+                            for e in category_meta_dicts})
         if verbose > 2:
-            print '** synset_urls =', synset_urls
-            print '** category_meta_dicts =', category_meta_dicts
+            print('** synset_urls =', synset_urls)
+            print('** category_meta_dicts =', category_meta_dicts)
 
         self._trials = {'imgFiles': imgs, 'imgData': imgData, 'labels': labels,
                                'meta_field': [meta_field] * len(labels)}
@@ -889,7 +890,7 @@ class MatchToSampleFromDLDataExperimentWithReward(
             combs = html_data['combs']
             acc = np.linspace(0, 1, 100)
             n = float(len(combs[0]))
-            print n
+            print(n)
             fudged_hr = (acc / n) / (1 / n)
             fudged_fa = ((1 / n) - acc / n) / (1 - 1 / n)
             fudged_hr[0] = 1. / (2 * 100)
@@ -1013,7 +1014,7 @@ def parse_human_data_from_HITdata(assignments, HITdata=None, comment='',
     for a in assignments:
         try:
             if verbose:
-                print a.WorkerId
+                print(a.WorkerId)
             assert len(a.answers) == 1      # must be
             assert len(a.answers[0]) == 1   # multiple ans not supported
             qfa = a.answers[0][0]
@@ -1092,13 +1093,13 @@ def update_mongodb_once(coll, subj_data, meta, verbose=False, overwrite=False):
                 _id = subj.pop('_id')
                 if verbose and str(_id) not in str(doc_id) \
                         and str(doc_id) not in str(_id):
-                    print 'Dangling _id:', _id
+                    print('Dangling _id:', _id)
             coll.update({'_id': doc_id}, {
                 '$set': subj
                 }, w=0)
 
         if verbose:
-            print 'Added:', doc_id
+            print('Added:', doc_id)
 
         if meta is None:
             continue
@@ -1148,7 +1149,7 @@ def getidfromURL(urls):
 def convertTabArrayToDict(meta_tabarray, lookup_field=LOOKUP_FIELD):
     meta_dict = {}
     for m in meta_tabarray:
-        meta_dict[m[lookup_field]] = SONify(dict(zip(meta_tabarray.dtype.names,
+        meta_dict[m[lookup_field]] = ut.SONify(dict(zip(meta_tabarray.dtype.names,
             m)))
     return meta_dict
 
@@ -1177,42 +1178,42 @@ def updateGeoData(collect):
                 print(str(c['WorkerID']) + ': ' +
                         str(response['countryName']))
 
-
-def SONify(arg, memo=None):
-    if memo is None:
-        memo = {}
-    if id(arg) in memo:
-        rval = memo[id(arg)]
-    if isinstance(arg, ObjectId):
-        rval = arg
-    elif isinstance(arg, datetime.datetime):
-        rval = arg
-    elif isinstance(arg, np.floating):
-        rval = float(arg)
-    elif isinstance(arg, np.integer):
-        rval = int(arg)
-    elif isinstance(arg, (list, tuple)):
-        rval = type(arg)([SONify(ai, memo) for ai in arg])
-    elif isinstance(arg, collections.OrderedDict):
-        rval = collections.OrderedDict([(SONify(k, memo), SONify(v, memo))
-            for k, v in arg.items()])
-    elif isinstance(arg, dict):
-        rval = dict([(SONify(k, memo), SONify(v, memo))
-            for k, v in arg.items()])
-    elif isinstance(arg, (basestring, float, int, type(None))):
-        rval = arg
-    elif isinstance(arg, np.ndarray):
-        if arg.ndim == 0:
-            rval = SONify(arg.sum())
-        else:
-            rval = map(SONify, arg)  # N.B. memo None
-    # -- put this after ndarray because ndarray not hashable
-    elif arg in (True, False):
-        rval = int(arg)
-    else:
-        raise TypeError('SONify', arg)
-    memo[id(rval)] = rval
-    return rval
+#
+# def SONify(arg, memo=None):
+#     if memo is None:
+#         memo = {}
+#     if id(arg) in memo:
+#         rval = memo[id(arg)]
+#     if isinstance(arg, ObjectId):
+#         rval = arg
+#     elif isinstance(arg, datetime.datetime):
+#         rval = arg
+#     elif isinstance(arg, np.floating):
+#         rval = float(arg)
+#     elif isinstance(arg, np.integer):
+#         rval = int(arg)
+#     elif isinstance(arg, (list, tuple)):
+#         rval = type(arg)([SONify(ai, memo) for ai in arg])
+#     elif isinstance(arg, collections.OrderedDict):
+#         rval = collections.OrderedDict([(SONify(k, memo), SONify(v, memo))
+#             for k, v in arg.items()])
+#     elif isinstance(arg, dict):
+#         rval = dict([(SONify(k, memo), SONify(v, memo))
+#             for k, v in arg.items()])
+#     elif isinstance(arg, (basestring, float, int, type(None))):
+#         rval = arg
+#     elif isinstance(arg, np.ndarray):
+#         if arg.ndim == 0:
+#             rval = SONify(arg.sum())
+#         else:
+#             rval = map(SONify, arg)  # N.B. memo None
+#     # -- put this after ndarray because ndarray not hashable
+#     elif arg in (True, False):
+#         rval = int(arg)
+#     else:
+#         raise TypeError('SONify', arg)
+#     memo[id(rval)] = rval
+#     return rval
 
 
 def upload_files(srcfiles, bucketname, dstprefix='',
@@ -1250,7 +1251,7 @@ def upload_files(srcfiles, bucketname, dstprefix='',
         keys.append(k)
 
         if verbose and i_fn % verbose == 0:
-            print 'At:', i_fn, 'out of', len(srcfiles)
+            print('At:', i_fn, 'out of', len(srcfiles))
 
     return keys
 
@@ -1276,7 +1277,7 @@ def download_results(hitids, dstprefix=None, sandbox=True,
 
     for hitid in hitids:
         if verbose:
-            print 'At (%d/%d):' % (n_hits + 1, n_total), hitid
+            print('At (%d/%d):' % (n_hits + 1, n_total), hitid)
 
         assignments, HITdata = exp.getHITdataraw(hitid)
         n_hits += 1
