@@ -2,10 +2,13 @@
 import os
 import json
 from bson import json_util
+from bson import ObjectId
+import datetime
 import shutil as sh
+import numpy as np
+import collections
+from collections import Counter, defaultdict
 # import base
-
-
 
 def SONify(arg, memo=None):
     if memo is None:
@@ -28,7 +31,7 @@ def SONify(arg, memo=None):
     elif isinstance(arg, dict):
         rval = dict([(SONify(k, memo), SONify(v, memo))
             for k, v in arg.items()])
-    elif isinstance(arg, (basestring, float, int, type(None))):
+    elif isinstance(arg, (str, float, int, type(None))):
         rval = arg
     elif isinstance(arg, np.ndarray):
         if arg.ndim == 0:
@@ -45,13 +48,14 @@ def SONify(arg, memo=None):
 
 
 def chunker(seq, size):
-    return (seq[pos:pos + size] for pos in xrange(0, len(seq), size))
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
 def dictchunker(seqdict, size):
-    L = len(seqdict[seqdict.keys()[0]])
-    return ({k: seqdict[k][pos:pos + size] for k in seqdict.keys()}
-            for pos in xrange(0, L, size))
+    seqdictkeys = list(seqdict.keys())
+    L = len(seqdict[seqdictkeys[0]])
+    return ({k: seqdict[k][pos:pos + size] for k in seqdictkeys}
+            for pos in range(0, L, size))
 
 
 def prep_web_simple(trials, src, dstdir, rules, dstpatt='output_n%04d.html',
@@ -179,7 +183,7 @@ def validate_html_files(filenames, ruledict,
         assert sorted(trials_org.keys()) == sorted(trials.keys())
         for ind in trials_org:
             assert len(trials[ind]) % len(trials_org[ind]) == 0
-            mult = len(trials[ind]) / len(trials_org[ind])
+            mult = int(len(trials[ind]) / len(trials_org[ind]))
             if mult * trials_org[ind] != trials[ind]:
                 assert mult * len(trials_org[ind]) == len(trials[ind]), (len(trials_org[ind]), len(trials[ind]))
 

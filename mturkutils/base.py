@@ -4,6 +4,7 @@ MTurk. Contact Ethan Solomon (esolomon@mit.edu), Diego Ardila (ardila@mit.edu),
 or Ha Hong (hahong@mit.edu) for help!
 """
 import pymongo
+import pandas as pd
 import copy
 import glob
 import urllib
@@ -309,13 +310,15 @@ class Experiment(object):
         else:
             mongo_host = self.mongo_host
 
-#        if isinstance(meta, tabarray):
-#            print('Converting tabarray to dictionary for speed. '
-#                    'This may take a minute...')
-#            self.meta = convertTabArrayToDict(meta)
-#        else:
-#            self.meta = meta
-        self.meta = meta
+        if isinstance(meta, pd.DataFrame):
+           print('Converting dataframe to dictionary for speed. '
+                   'This may take a minute...')
+           self.meta = convertDataFrameToDict(meta)
+        else:
+            print('No conversion')
+            self.meta = meta
+
+
         # if no db connection is requested, bypass the rest
         if collection_name is None:
             return
@@ -324,7 +327,7 @@ class Experiment(object):
             raise AttributeError('Must provide comment!')
 
         # make db connection and create collection
-        if not isinstance(self.collection_name, (str, unicode)) or \
+        if not isinstance(self.collection_name, (str, bytes)) or \
                 len(self.collection_name) == 0:
             raise NameError('Please provide a valid MTurk'
                     'database collection name.')
@@ -441,7 +444,7 @@ class Experiment(object):
         tmpdir_production = self.tmpdir_production
         trials_loc = self.trials_loc
 
-        trials_org = pk.load(open(os.path.join(tmpdir, trials_loc)))
+        trials_org = pk.load(open(os.path.join(tmpdir, trials_loc), 'rb'))
 
         fns_sandbox = sorted(glob.glob(os.path.join(
             tmpdir_sandbox, '*.html')))
@@ -617,7 +620,7 @@ class Experiment(object):
                         src.lower()):
                     sdata = parse_human_data(src)
                 else:
-                    assgns, hd = pk.load(open(src))[:2]
+                    assgns, hd = pk.load(open(src), 'rb')[:2]
                     sdata = parse_human_data_from_HITdata(assgns, HITdata=hd,
                             comment=self.comment, description=self.description,
                             full=False)
@@ -740,6 +743,9 @@ class MatchToSampleFromDLDataExperiment(Experiment):
         meta = html_data.get('meta')
         shuffle_test = html_data.get('shuffle_test', False)
 
+        # if isinstance(meta, pd.DataFrame):
+        #     meta = convertDataFrameToDict(meta)
+
         if meta is None:
             if dataset is None:
                 raise ValueError('Either "meta" or "dataset" '
@@ -804,11 +810,13 @@ class MatchToSampleFromDLDataExperiment(Experiment):
             print('** category_occurences =', category_occurences)
 
         for url, img_ind in zip(urls, img_inds):
-            meta_entry = meta[img_ind]
+            # meta_entry = meta[img_ind]
+            meta_entry = meta.iloc[img_ind,:]
             category = meta_entry[meta_field]
             synset_urls[category].append(url)
-            meta_dict = {name: value for name, value in
-                         zip(meta_entry.dtype.names, meta_entry.tolist())}
+            meta_dict = dict(meta_entry)
+            # meta_dict = {name: value for name, value in
+            #              zip(meta_entry.dtype.names, meta_entry.tolist())}
             category_meta_dicts[category].append(meta_dict)
         imgs = []
         labels = []
@@ -816,7 +824,7 @@ class MatchToSampleFromDLDataExperiment(Experiment):
             #We cycle through the possible sample categories one by one.
             for _rep in np.arange(np.ceil(float(k) / n)):
                 for sample_synset in c:
-                    rng = np.random.RandomState(seed=(seed, _rep))
+                    rng = np.random.RandomState(seed=(int(seed), int(_rep)))
                     sample = synset_urls[sample_synset].pop()
                     sample_meta = category_meta_dicts[sample_synset].pop()
 
@@ -1115,7 +1123,7 @@ def search_meta(needles, meta, lookup_field=LOOKUP_FIELD):
     """Search `needles` in `meta` and returns the corresponding records.
     This replaces old `get_meta()` and `get_meta_fromtabarray()`."""
     single = False
-    if isinstance(needles, (str, unicode)):
+    if isinstance(needles, (bytes, str)):
         single = True
         needles = [needles]
 
@@ -1145,6 +1153,13 @@ def getidfromURL(urls):
     ids = [urllib.url2pathname(u).split('/')[-1].split('.')[0] for u in urls]
     return ids if not single else ids[0]
 
+
+def convertDataFrameToDict(meta_df, lookup_field=LOOKUP_FIELD):
+    meta_dict = {}
+    for mi in range(meta_df.shape[0]):
+        meta_curr = meta_df.iloc[mi]
+        meta_dict[meta_curr[lookup_field]] = ut.SONify(dict(meta_curr))
+    return meta_dict
 
 def convertTabArrayToDict(meta_tabarray, lookup_field=LOOKUP_FIELD):
     meta_dict = {}
@@ -1242,12 +1257,12 @@ def upload_files(srcfiles, bucketname, dstprefix='',
             bucket.set_acl(acl, key_dst)
 
         # download and check... although this is a bit redundant
-        if test:
-            k = Key(bucket)
-            k.key = key_dst
-            s = k.get_contents_as_string()
-            k.close()
-            assert s == open(fn).read()
+        # if test:
+        #     k = Key(bucket)
+        #     k.key = key_dst
+        #     s = k.get_contents_as_string()
+        #     k.close()
+        #     assert s == open(fn).read()
         keys.append(k)
 
         if verbose and i_fn % verbose == 0:
@@ -1330,7 +1345,7 @@ def connect_s3(section_name=MTURK_CRED_SECTION, accesskey=None,
 def exists_s3(bucketname_or_bucket, keyname, section_name=MTURK_CRED_SECTION,
         accesskey=None, secretkey=None):
     """Check whether a key is in the bucket"""
-    if isinstance(bucketname_or_bucket, (str, unicode)):
+    if isinstance(bucketname_or_bucket, (str, bytes)):
         # -- establish connections
         _, bucket = connect_s3(section_name=section_name, accesskey=accesskey,
                 secretkey=secretkey, bucketname=bucketname_or_bucket)
