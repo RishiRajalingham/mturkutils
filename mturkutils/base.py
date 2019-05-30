@@ -17,15 +17,11 @@ import scipy.stats as stats
 import pickle as pk
 from collections import Counter, defaultdict
 import csv
-import boto
+import boto, boto3, botocore
 import boto.mturk
 from warnings import warn
-#from tabular.tab import tabarray
-# dont use tabular!
-from bson.objectid import ObjectId
-from boto.s3.connection import S3Connection
+
 from boto.s3.key import Key
-from boto.mturk.connection import MTurkConnection
 from boto.mturk.qualification import PercentAssignmentsApprovedRequirement
 from boto.mturk.qualification import Qualifications
 from boto.mturk.question import ExternalQuestion
@@ -33,6 +29,25 @@ from boto.pyami.config import Config
 
 import mturkutils.utils as ut
 
+
+"""
+mturk = boto3.client('mturk',
+   aws_access_key_id = "PASTE_YOUR_IAM_USER_ACCESS_KEY",
+   aws_secret_access_key = "PASTE_YOUR_IAM_USER_SECRET_KEY",
+   region_name='us-east-1',
+   endpoint_url = MTURK_SANDBOX
+)
+endpoint_url = 'https://mturk-requester-sandbox.us-east-1.amazonaws.com'
+
+# Uncomment this line to use in production
+# endpoint_url = 'https://mturk-requester.us-east-1.amazonaws.com'
+
+client = boto3.client('mturk', region_name='us-east-1', 
+aws_access_key_id=self.access_key_id,
+    aws_secret_access_key=self.secretkey, 
+    )
+
+"""
 MTURK_SANDBOX_HOST = 'mechanicalturk.sandbox.amazonaws.com'
 MTURK_CRED_SECTION = 'MTurkCredentials'
 MTURK_PAGE_SIZE_LIMIT = 100    # imposed by Amazon
@@ -274,7 +289,8 @@ class Experiment(object):
         """Returns the amount of available funds. If you're in Sandbox mode,
         this will always return $10,000.
         """
-        return self.conn.get_account_balance()[0].amount
+        # return self.conn.get_account_balance()[0].amount
+        return float(self.conn.get_account_balance()['AvailableBalance'])
 
     def setMongoVars(self):
         """Establishes connection to database
@@ -483,14 +499,34 @@ class Experiment(object):
         """Establishes connection to MTurk for publishing HITs and getting
         data. Pass sandbox=True if you want to use sandbox mode.
         """
-        if not self.sandbox:
-            conn = MTurkConnection(aws_access_key_id=self.access_key_id,
-                                   aws_secret_access_key=self.secretkey, )
+        if self.sandbox:
+            endpoint_url = 'https://mturk-requester-sandbox.us-east-1.amazonaws.com'
         else:
-            conn = MTurkConnection(aws_access_key_id=self.access_key_id,
-                                   aws_secret_access_key=self.secretkey,
-                                   host=MTURK_SANDBOX_HOST)
+            endpoint_url = 'https://mturk-requester.us-east-1.amazonaws.com'
+        conn = boto3.client('mturk',
+                             aws_access_key_id=self.access_key_id,
+                             aws_secret_access_key=self.secretkey,
+                             region_name='us-east-1',
+                             endpoint_url=endpoint_url,
+                             )
         return conn
+
+        # Uncomment this line to use in production
+        # # endpoint_url = 'https://mturk-requester.us-east-1.amazonaws.com'
+        #
+        # client = boto3.client('mturk', region_name='us-east-1',
+        #                       aws_access_key_id=self.access_key_id,
+        #                       aws_secret_access_key=self.secretkey,
+        #                       )
+        #
+        # if not self.sandbox:
+        #     conn = MTurkConnection(aws_access_key_id=self.access_key_id,
+        #                            aws_secret_access_key=self.secretkey, )
+        # else:
+        #     conn = MTurkConnection(aws_access_key_id=self.access_key_id,
+        #                            aws_secret_access_key=self.secretkey,
+        #                            host=MTURK_SANDBOX_HOST)
+        # return conn
 
     def setQual(self, performance_thresh=90):
         self.qual = create_qual(performance_thresh)
@@ -558,21 +594,31 @@ class Experiment(object):
             return
 
         self.hitids = []
+        self.htypid = []
         for urlnum, url in enumerate(URLlist):
             q = ExternalQuestion(external_url=url,
                     frame_height=self.frame_height_pix)
-            create_hit_rs = conn.create_hit(question=q, lifetime=self.lifetime,
-                    max_assignments=self.max_assignments, title=self.title,
-                    keywords=self.keywords, reward=self.reward,
-                    duration=self.duration, approval_delay=self.approval_delay,
-                    annotation=url, qualifications=self.qual,
-                    description=self.description, response_groups=['Minimal',
-                        'HITDetail', 'HITQuestion', 'HITAssignmentSummary'])
+            questionform = q.get_as_xml()
+            create_hit_rs = conn.create_hit(Question=questionform,
+                                            LifetimeInSeconds=self.lifetime,
+                                            MaxAssignments=self.max_assignments,
+                                            Title=self.title,
+                                            Keywords=str(self.keywords),
+                                            Reward=str(self.reward),
+                                            AssignmentDurationInSeconds=self.duration,
+                                            AutoApprovalDelayInSeconds=self.approval_delay,
+                                            RequesterAnnotation=url,
+                                            # QualificationRequirements=self.qual,
+                                            Description=self.description,
+                                            # ResponseGroups=['Minimal','HITDetail', 'HITQuestion', 'HITAssignmentSummary']
+                                            )
+            self.hitids.append(create_hit_rs['HIT']['HITId'])
+            self.htypid.append(create_hit_rs['HIT']['HITTypeId'])
 
-            for hit in create_hit_rs:
-                self.hitids.append(hit.HITId)
-                self.htypid = hit.HITTypeId
-            assert create_hit_rs.status
+            # for hit in create_hit_rs:
+            #     self.hitids.append(hit.HITId)
+            #     self.htypid = hit.HITTypeId
+            # assert create_hit_rs.status
 
             if verbose:
                 print(str(urlnum) + ': ' + url + ', ' + self.hitids[-1])
@@ -584,7 +630,7 @@ class Experiment(object):
                                     'hitids', str(self.htypid), date]) + '.pkl'
         else:
             file_string = hitidslog
-        pk.dump(self.hitids, file(file_string, 'wb'))
+        pk.dump(self.hitids, open(file_string, 'wb'))
         return self.hitids
 
     def disableHIT(self, hitids=None):
@@ -1193,44 +1239,6 @@ def updateGeoData(collect):
                 print(str(c['WorkerID']) + ': ' +
                         str(response['countryName']))
 
-#
-# def SONify(arg, memo=None):
-#     if memo is None:
-#         memo = {}
-#     if id(arg) in memo:
-#         rval = memo[id(arg)]
-#     if isinstance(arg, ObjectId):
-#         rval = arg
-#     elif isinstance(arg, datetime.datetime):
-#         rval = arg
-#     elif isinstance(arg, np.floating):
-#         rval = float(arg)
-#     elif isinstance(arg, np.integer):
-#         rval = int(arg)
-#     elif isinstance(arg, (list, tuple)):
-#         rval = type(arg)([SONify(ai, memo) for ai in arg])
-#     elif isinstance(arg, collections.OrderedDict):
-#         rval = collections.OrderedDict([(SONify(k, memo), SONify(v, memo))
-#             for k, v in arg.items()])
-#     elif isinstance(arg, dict):
-#         rval = dict([(SONify(k, memo), SONify(v, memo))
-#             for k, v in arg.items()])
-#     elif isinstance(arg, (basestring, float, int, type(None))):
-#         rval = arg
-#     elif isinstance(arg, np.ndarray):
-#         if arg.ndim == 0:
-#             rval = SONify(arg.sum())
-#         else:
-#             rval = map(SONify, arg)  # N.B. memo None
-#     # -- put this after ndarray because ndarray not hashable
-#     elif arg in (True, False):
-#         rval = int(arg)
-#     else:
-#         raise TypeError('SONify', arg)
-#     memo[id(rval)] = rval
-#     return rval
-
-
 def upload_files(srcfiles, bucketname, dstprefix='',
         section_name=MTURK_CRED_SECTION, test=True, verbose=False,
         accesskey=None, secretkey=None, dstfiles=None, acl='public-read'):
@@ -1248,22 +1256,10 @@ def upload_files(srcfiles, bucketname, dstprefix='',
         if dfn is None:
             dfn = fn
         # upload
-        key_dst = dstprefix + os.path.basename(dfn)
-        k = Key(bucket)
-        k.key = key_dst
-        k.set_contents_from_filename(fn)
-        k.close()
-        if acl is not None:
-            bucket.set_acl(acl, key_dst)
-
-        # download and check... although this is a bit redundant
-        # if test:
-        #     k = Key(bucket)
-        #     k.key = key_dst
-        #     s = k.get_contents_as_string()
-        #     k.close()
-        #     assert s == open(fn).read()
-        keys.append(k)
+        bucket.upload_file(fn, dfn)
+        o = bucket.Object(dfn)
+        o.Acl().put(ACL=acl)
+        keys.append(dfn)
 
         if verbose and i_fn % verbose == 0:
             print('At:', i_fn, 'out of', len(srcfiles))
@@ -1324,22 +1320,39 @@ def connect_s3(section_name=MTURK_CRED_SECTION, accesskey=None,
 
     # -- establish connections
     try:
-        conn = S3Connection(accesskey, secretkey)
+        s3 = boto3.resource('s3',
+                             aws_access_key_id=accesskey,
+                             aws_secret_access_key=secretkey,
+                             region_name='us-east-1',
+                             )
+        # conn = S3Connection(accesskey, secretkey)
     except boto.exception.S3ResponseError:
         raise ValueError('Could not establish an S3 conection. '
                 'Is your account properly configured?')
 
     if bucketname is not None:
+        bucket = s3.Bucket(bucketname)
+        exists = True
         try:
-            bucket = conn.get_bucket(bucketname)
-        except boto.exception.S3ResponseError:
-            print('Bucket does not exist.')
-            bucket = None
-            if createbucket:
-                print('Creating a new bucket...')
-                bucket = conn.create_bucket(bucketname)
-        return conn, bucket
-    return conn
+            s3.meta.client.head_bucket(Bucket=bucketname)
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == '404':
+                exists = False
+        if (exists is False) and createbucket:
+            print('Creating a new bucket...')
+            bucket = s3.create_bucket(bucketname)
+
+        # try:
+        #     bucket = conn.get_bucket(bucketname)
+        # except boto.exception.S3ResponseError:
+        #     print('Bucket does not exist.')
+        #     bucket = None
+        #     if createbucket:
+        #         print('Creating a new bucket...')
+        #         bucket = conn.create_bucket(bucketname)
+        # return conn, bucket
+    return s3, bucket
 
 
 def exists_s3(bucketname_or_bucket, keyname, section_name=MTURK_CRED_SECTION,
