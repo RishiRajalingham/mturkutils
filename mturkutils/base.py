@@ -17,9 +17,10 @@ import scipy.stats as stats
 import pickle as pk
 from collections import Counter, defaultdict
 import csv
-import boto, boto3, botocore
+import boto
 import logging
 import boto3
+import xmltodict
 from botocore.exceptions import ClientError
 
 import boto.mturk
@@ -221,141 +222,140 @@ class Experiment(object):
 
         self.trials_per_hit = trials_per_hit
 
-        self.comment = comment
-        self.meta = meta
-        self.mongo_port = mongo_port
-        self.mongo_host = mongo_host
-        self.mongo_dbname = mongo_dbname
-        self.collection_name = collection_name
-        self.setMongoVars()
+        # self.comment = comment
+        # self.meta = meta
+        # self.mongo_port = mongo_port
+        # self.mongo_host = mongo_host
+        # self.mongo_dbname = mongo_dbname
+        # self.collection_name = collection_name
+        # # self.setMongoVars()
         self.conn = self.connect()
-
-    def payBonuses(self, performance_threshold=None, bonus_threshold=None,
-            performance_key='Performance', performance_error=False,
-            auto_approve=True):
-        """
-        This function approves and grants bonuses on all hits above a certain
-        performance, with a bonus (stored in database) under a certain
-        threshold (checked for safety).
-        """
-        coll = self.db[self.collection_name]
-        if auto_approve:
-            for doc in coll.find():
-                assignment_id = doc['AssignmentID']
-                try:
-                    assignment_status = \
-                            self.conn.get_assignment(assignment_id
-                                    )[0].AssignmentStatus
-                    performance = doc.get(performance_key)
-                    if (performance_threshold is not None) and \
-                            (performance is not None):
-                        if (performance_error and
-                                performance > performance_threshold) or \
-                                        (performance < performance_threshold):
-                            if assignment_status in ['Submitted']:
-                                self.conn.reject_assignment(assignment_id,
-                                    feedback='Your performance was '
-                                    'significantly lower than other subjects')
-                    else:
-                        if assignment_status in ['Submitted']:
-                            self.conn.approve_assignment(assignment_id)
-                except boto.mturk.connection.MTurkRequestError as e:
-                    print('Error for assignment_id %s' % assignment_id, e)
-        for doc in coll.find():
-            assignment_id = doc['AssignmentID']
-            worker_id = doc['WorkerID']
-            try:
-                assignment_status = \
-                        self.conn.get_assignment(assignment_id
-                                )[0].AssignmentStatus
-            except boto.mturk.connection.MTurkRequestError as e:
-                print('Error for assignment_id %s' % assignment_id, e)
-                continue
-            bonus = doc.get('Bonus')
-            if (bonus is not None) and (assignment_status == 'Approved'):
-                if (bonus_threshold is None) or (float(bonus) <
-                        float(bonus_threshold)):
-                    if not doc.get('BonusAwarded', False):
-                        bonus = np.round(float(bonus) * 100) / 100
-                        if bonus >= 0.01:
-                            p = boto.mturk.price.Price(bonus)
-                            print('award granted')
-                            print(bonus)
-                            self.conn.grant_bonus(worker_id,
-                                    assignment_id,
-                                    p,
-                                    "Performance Bonus")
-                            coll.update({'_id': doc['_id']},
-                                    {'$set': {'BonusAwarded': True}},
-                                    multi=True)
+    #
+    # def payBonuses(self, performance_threshold=None, bonus_threshold=None,
+    #         performance_key='Performance', performance_error=False,
+    #         auto_approve=True):
+    #     """
+    #     This function approves and grants bonuses on all hits above a certain
+    #     performance, with a bonus (stored in database) under a certain
+    #     threshold (checked for safety).
+    #     """
+    #     coll = self.db[self.collection_name]
+    #     if auto_approve:
+    #         for doc in coll.find():
+    #             assignment_id = doc['AssignmentID']
+    #             try:
+    #                 assignment_status = \
+    #                         self.conn.get_assignment(assignment_id
+    #                                 )[0].AssignmentStatus
+    #                 performance = doc.get(performance_key)
+    #                 if (performance_threshold is not None) and \
+    #                         (performance is not None):
+    #                     if (performance_error and
+    #                             performance > performance_threshold) or \
+    #                                     (performance < performance_threshold):
+    #                         if assignment_status in ['Submitted']:
+    #                             self.conn.reject_assignment(assignment_id,
+    #                                 feedback='Your performance was '
+    #                                 'significantly lower than other subjects')
+    #                 else:
+    #                     if assignment_status in ['Submitted']:
+    #                         self.conn.approve_assignment(assignment_id)
+    #             except boto.mturk.connection.MTurkRequestError as e:
+    #                 print('Error for assignment_id %s' % assignment_id, e)
+    #     for doc in coll.find():
+    #         assignment_id = doc['AssignmentID']
+    #         worker_id = doc['WorkerID']
+    #         try:
+    #             assignment_status = \
+    #                     self.conn.get_assignment(assignment_id
+    #                             )[0].AssignmentStatus
+    #         except boto.mturk.connection.MTurkRequestError as e:
+    #             print('Error for assignment_id %s' % assignment_id, e)
+    #             continue
+    #         bonus = doc.get('Bonus')
+    #         if (bonus is not None) and (assignment_status == 'Approved'):
+    #             if (bonus_threshold is None) or (float(bonus) <
+    #                     float(bonus_threshold)):
+    #                 if not doc.get('BonusAwarded', False):
+    #                     bonus = np.round(float(bonus) * 100) / 100
+    #                     if bonus >= 0.01:
+    #                         p = boto.mturk.price.Price(bonus)
+    #                         print('award granted')
+    #                         print(bonus)
+    #                         self.conn.grant_bonus(worker_id,
+    #                                 assignment_id,
+    #                                 p,
+    #                                 "Performance Bonus")
+    #                         coll.update({'_id': doc['_id']},
+    #                                 {'$set': {'BonusAwarded': True}},
+    #                                 multi=True)
 
     def getBalance(self):
         """Returns the amount of available funds. If you're in Sandbox mode,
         this will always return $10,000.
         """
-        # return self.conn.get_account_balance()[0].amount
         return float(self.conn.get_account_balance()['AvailableBalance'])
-
-    def setMongoVars(self):
-        """Establishes connection to database
-
-        :param collection_name: You must specify a valid collection name. If it
-            does not already exist, a new collection with that name will be
-            created in the mturk database.  If `None` is given, the actual db
-            coonection will be bypassed, and all db-related functions will not
-            work.
-        :param comment: Explanation of the task and data format to be included
-            in the database for this experiment. The description should be
-            adequate for future investigators to understand what you did and
-            what the data means.
-        :param meta: You can optionally provide a metadata object, which will
-            be converted into a dictionary indexed by the 'id' field (unless
-        otherwise specified).
-        """
-
-        self.mongo_conn = None
-        self.db = None
-        self.collection = None
-
-        meta = self.meta
-        mongo_dbname = self.mongo_dbname
-        collection_name = self.collection_name
-
-        if self.mongo_port is None:
-            mongo_port = MONGO_PORT
-        else:
-            mongo_port = self.mongo_port
-        if self.mongo_host is None:
-            mongo_host = MONGO_HOST
-        else:
-            mongo_host = self.mongo_host
-
-        if isinstance(meta, pd.DataFrame):
-           print('Converting dataframe to dictionary for speed. '
-                   'This may take a minute...')
-           self.meta = convertDataFrameToDict(meta)
-        else:
-            print('No conversion')
-            self.meta = meta
-
-
-        # if no db connection is requested, bypass the rest
-        if collection_name is None:
-            return
-
-        if self.comment is None or len(self.comment) == 0:
-            raise AttributeError('Must provide comment!')
-
-        # make db connection and create collection
-        if not isinstance(self.collection_name, (str, bytes)) or \
-                len(self.collection_name) == 0:
-            raise NameError('Please provide a valid MTurk'
-                    'database collection name.')
-
-        #Connect to pymongo database for MTurk results.
-        self.mongo_conn = pymongo.MongoClient(host=mongo_host, port=mongo_port)
-        self.db = self.mongo_conn[mongo_dbname]
-        self.collection = self.db[collection_name]
+    #
+    # def setMongoVars(self):
+    #     """Establishes connection to database
+    #
+    #     :param collection_name: You must specify a valid collection name. If it
+    #         does not already exist, a new collection with that name will be
+    #         created in the mturk database.  If `None` is given, the actual db
+    #         coonection will be bypassed, and all db-related functions will not
+    #         work.
+    #     :param comment: Explanation of the task and data format to be included
+    #         in the database for this experiment. The description should be
+    #         adequate for future investigators to understand what you did and
+    #         what the data means.
+    #     :param meta: You can optionally provide a metadata object, which will
+    #         be converted into a dictionary indexed by the 'id' field (unless
+    #     otherwise specified).
+    #     """
+    #
+    #     self.mongo_conn = None
+    #     self.db = None
+    #     self.collection = None
+    #
+    #     meta = self.meta
+    #     mongo_dbname = self.mongo_dbname
+    #     collection_name = self.collection_name
+    #
+    #     if self.mongo_port is None:
+    #         mongo_port = MONGO_PORT
+    #     else:
+    #         mongo_port = self.mongo_port
+    #     if self.mongo_host is None:
+    #         mongo_host = MONGO_HOST
+    #     else:
+    #         mongo_host = self.mongo_host
+    #
+    #     if isinstance(meta, pd.DataFrame):
+    #        print('Converting dataframe to dictionary for speed. '
+    #                'This may take a minute...')
+    #        self.meta = convertDataFrameToDict(meta)
+    #     else:
+    #         print('No conversion')
+    #         self.meta = meta
+    #
+    #
+    #     # if no db connection is requested, bypass the rest
+    #     if collection_name is None:
+    #         return
+    #
+    #     if self.comment is None or len(self.comment) == 0:
+    #         raise AttributeError('Must provide comment!')
+    #
+    #     # make db connection and create collection
+    #     if not isinstance(self.collection_name, (str, bytes)) or \
+    #             len(self.collection_name) == 0:
+    #         raise NameError('Please provide a valid MTurk'
+    #                 'database collection name.')
+    #
+    #     #Connect to pymongo database for MTurk results.
+    #     self.mongo_conn = pymongo.MongoClient(host=mongo_host, port=mongo_port)
+    #     self.db = self.mongo_conn[mongo_dbname]
+    #     self.collection = self.db[collection_name]
 
     def createTrials(self):
         raise NotImplementedError
@@ -515,23 +515,6 @@ class Experiment(object):
                              )
         return conn
 
-        # Uncomment this line to use in production
-        # # endpoint_url = 'https://mturk-requester.us-east-1.amazonaws.com'
-        #
-        # client = boto3.client('mturk', region_name='us-east-1',
-        #                       aws_access_key_id=self.access_key_id,
-        #                       aws_secret_access_key=self.secretkey,
-        #                       )
-        #
-        # if not self.sandbox:
-        #     conn = MTurkConnection(aws_access_key_id=self.access_key_id,
-        #                            aws_secret_access_key=self.secretkey, )
-        # else:
-        #     conn = MTurkConnection(aws_access_key_id=self.access_key_id,
-        #                            aws_secret_access_key=self.secretkey,
-        #                            host=MTURK_SANDBOX_HOST)
-        # return conn
-
     def setQual(self, performance_thresh=90):
         self.qual = create_qual(performance_thresh)
         if self.other_quals is not None:
@@ -621,11 +604,6 @@ class Experiment(object):
             self.hitids.append(create_hit_rs['HIT']['HITId'])
             self.htypid.append(create_hit_rs['HIT']['HITTypeId'])
 
-            # for hit in create_hit_rs:
-            #     self.hitids.append(hit.HITId)
-            #     self.htypid = hit.HITTypeId
-            # assert create_hit_rs.status
-
             if verbose:
                 print(str(urlnum) + ': ' + url + ', ' + self.hitids[-1])
 
@@ -644,7 +622,32 @@ class Experiment(object):
         if hitids is None:
             hitids = self.hitids
         for hitid in hitids:
-            self.conn.disable_hit(hitid)
+            self.conn.delete_hit(HITId=hitid)
+
+    def _download_local(self, srcs, mode):
+
+        if mode == 'hitids':
+            hit_ids = srcs
+        else:
+            hit_ids = [x['HITId'] for x in self.conn.list_hits()['HITs']]
+
+        HITdata = []
+        for hitid in hit_ids:
+            assignments = self.conn.list_assignments_for_hit(HITId=hitid)['Assignments']
+
+            for assign_ in assignments:
+
+                if assign_['AssignmentStatus'] in ['Submitted', 'Approved', 'Rejected']:
+                    xml_doc = xmltodict.parse(assign_)
+                    s = xml_doc['QuestionFormAnswers']['Answer']['FreeText']
+                    s = s.replace("'", "\"")
+                    d = json.loads(s)
+                    for fk in ['AssignmentId', 'WorkerId', 'HITId']:
+                        d[fk] = assign_[fk]
+                    HITdata.append(d)
+
+        self.all_data = HITdata
+        return HITdata
 
     def _updateDBcore(self, srcs, mode, **kwargs):
         """See the documentation of updateDBwithHITs() and
@@ -686,7 +689,7 @@ class Experiment(object):
         self.all_data = all_data
         return all_data
 
-    def updateDBwithHITs(self, hitids, **kwargs):
+    def updateDBwithHITs(self, hitids, download_only=True, **kwargs):
         """
         - Takes a list of HIT IDs, gets data from MTurk, attaches metadata (if
           necessary) and puts results in dicarlo5 database.
@@ -698,7 +701,10 @@ class Experiment(object):
           - verbose: show the progress of db update
           - overwrite: if True, the existing records will be overwritten.
         """
-        return self._updateDBcore(hitids, 'hitids', **kwargs)
+        if download_only:
+            return self._download_local(hitids, 'hitids')
+        else:
+            return self._updateDBcore(hitids, 'hitids', **kwargs)
 
     def updateDBwithHITslocal(self, datafiles, mode='files', **kwargs):
         """
@@ -722,16 +728,14 @@ class Experiment(object):
         # as much as possible, especially the returned data.
 
         try:
-            assignments = self.conn.get_assignments(hit_id=hitid,
-                    page_size=min(self.max_assignments, MTURK_PAGE_SIZE_LIMIT))
-            HITdata = self.conn.get_hit(hit_id=hitid)
+            assignments = self.conn.list_assignments_for_hit(HITId=hitid)['Assignments']
+            HITdata = []
+            for assign_ in assignments:
+                if assign_['AssignmentStatus'] in ['Submitted','Approved','Rejected']:
+                    answer = assign_['Answer']
+                    HITdata.append(answer)
         except Exception as e:
-            if retry == 0:
-                raise e
-            from time import sleep
-            sleep(5)
-            assignments, HITdata = self.getHITdataraw(hitid, retry=retry - 1)
-
+            raise e
         return assignments, HITdata
 
     def getHITdata(self, hitid, verbose=True, full=False):
@@ -1375,7 +1379,7 @@ def connect_s3(section_name=MTURK_CRED_SECTION, accesskey=None,
         exists = True
         try:
             s3.meta.client.head_bucket(Bucket=bucketname)
-        except botocore.exceptions.ClientError as e:
+        except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '404':
                 exists = False
