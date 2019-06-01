@@ -18,6 +18,10 @@ import pickle as pk
 from collections import Counter, defaultdict
 import csv
 import boto, boto3, botocore
+import logging
+import boto3
+from botocore.exceptions import ClientError
+
 import boto.mturk
 from warnings import warn
 
@@ -596,6 +600,8 @@ class Experiment(object):
         self.hitids = []
         self.htypid = []
         for urlnum, url in enumerate(URLlist):
+            print('External question conversion:')
+            print(url)
             q = ExternalQuestion(external_url=url,
                     frame_height=self.frame_height_pix)
             questionform = q.get_as_xml()
@@ -626,8 +632,8 @@ class Experiment(object):
         if hitidslog is None:
             prefix = 'sandbox' if self.sandbox else 'production'
             date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.%f")
-            file_string = self.log_prefix  + '_'.join([self.bucket_name, prefix,
-                                    'hitids', str(self.htypid), date]) + '.pkl'
+            file_string = self.log_prefix  + '_'.join([self.bucket_name, prefix, date]) + '.pkl'
+
         else:
             file_string = hitidslog
         pk.dump(self.hitids, open(file_string, 'wb'))
@@ -1239,13 +1245,23 @@ def updateGeoData(collect):
                 print(str(c['WorkerID']) + ': ' +
                         str(response['countryName']))
 
+"""
+note from rishi: looks like when html files are uploaded using boto3 (instead of boto, or the web browser)
+are not stored in such a way that they automatically open on the browser, but instead they are forced to download. 
+the downlaoded files, when uploaded using the browser, will work just fine. so it's not the file, probably, but how 
+it's encoded when uploaded using boto3 vs the browser tool. 
+"""
+
+
 def upload_files(srcfiles, bucketname, dstprefix='',
         section_name=MTURK_CRED_SECTION, test=True, verbose=False,
         accesskey=None, secretkey=None, dstfiles=None, acl='public-read'):
     """Upload multiple files into a S3 bucket"""
     # -- establish connections
-    _, bucket = connect_s3(section_name=section_name, accesskey=accesskey,
-            secretkey=secretkey, bucketname=bucketname, createbucket=True)
+    # s3, bucket = connect_s3(section_name=section_name, accesskey=accesskey,
+    #         secretkey=secretkey, bucketname=bucketname, createbucket=True)
+    s3 = boto3.client('s3', region_name='us-east-1', aws_access_key_id=accesskey,
+                      aws_secret_access_key=secretkey)
 
     if dstfiles is None:
         dstfiles = [None] * len(srcfiles)
@@ -1256,10 +1272,34 @@ def upload_files(srcfiles, bucketname, dstprefix='',
         if dfn is None:
             dfn = fn
         # upload
-        bucket.upload_file(fn, dfn)
-        o = bucket.Object(dfn)
-        o.Acl().put(ACL=acl)
+        dfn = dstprefix + os.path.basename(dfn)
+
+        try:
+            response = s3.upload_file(fn, bucketname, dfn,
+                                      ExtraArgs={'ACL': acl, 'ContentType': 'text/html'})
+
+        except ClientError as e:
+            logging.error(e)
+            return False
+
+        # s3.Object(bucketname, dfn).put(Body=open(fn, 'rb'))
+
+        # o = s3.Object(bucketname, dfn)
+        # o.put(Body=open(fn, 'rb'))
+        # bucket.upload_file(fn, dfn)
+        # o = bucket.Object(dfn)
+        # o.Acl().put(ACL=acl)
         keys.append(dfn)
+
+        # download and check... although this is a bit redundant
+        # if test:
+        #     obj = s3.Object(bucket, dfn)
+        #     s = obj.get()['Body'].read().decode('utf-8')
+        #     # k = Key(bucket)
+        #     # k.key = dfn
+        #     # s = k.get_contents_as_string()
+        #     # k.close()
+        # assert s == open(fn).read()
 
         if verbose and i_fn % verbose == 0:
             print('At:', i_fn, 'out of', len(srcfiles))
